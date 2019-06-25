@@ -39,9 +39,7 @@ func CpuInfo() (*CPU, error) {
 		}
 		switch strings.TrimSpace(fields[0]) {
 		case "flags":
-			if strings.Contains(fields[1], "hypervisor") {
-				cpu.Virtual = true
-			}
+			cpu.Virtual = strings.Contains(fields[1], "hypervisor")
 		case "model name":
 			cpu.Module = strings.TrimSpace(fields[1])
 		case "cpu MHz":
@@ -53,9 +51,6 @@ func CpuInfo() (*CPU, error) {
 					cpu.MHz = 1
 				}
 			}
-		}
-		if cpu.MHz != 0 && cpu.Module != "" {
-			break
 		}
 	}
 	return cpu, nil
