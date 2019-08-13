@@ -1,78 +1,76 @@
 package requests
 
 import (
-	"encoding/json"
-	"errors"
-	"io/ioutil"
+	"crypto/tls"
+	"fmt"
+	"net/http"
 
-	"github.com/RosenLo/toolkits/common"
-	log "github.com/Sirupsen/logrus"
-
-	"github.com/astaxie/beego/httplib"
+	"github.com/parnurzeal/gorequest"
 )
 
-func Call(method, url string, headers, params map[string]string, body map[string]interface{}, logger *log.Entry) (respData []byte, err error) {
-	var req *httplib.BeegoHTTPRequest
-	whileCode := []int{200, 201}
-	fields := log.Fields{
-		"url":     url,
-		"method":  method,
-		"headers": headers,
-		"params":  params,
-		"body":    body,
-	}
-	if logger == nil {
-		logger = log.WithFields(fields)
-	} else {
-		logger = logger.WithFields(fields)
-	}
+var (
+	request = NewRequest(false)
+)
 
-	if method == "GET" {
-		req = httplib.Get(url)
-	} else if method == "POST" {
-		req = httplib.Post(url)
-	} else if method == "PUT" {
-		req = httplib.Put(url)
-	} else if method == "DELETE" {
-		req = httplib.Delete(url)
-	} else if method == "HEAD" {
-		req = httplib.Head(url)
-	} else {
-		err = errors.New("invalid http method")
-		return
+type Requests struct {
+	req     *gorequest.SuperAgent
+	verbose bool
+}
+
+func NewRequest(verbose bool) *Requests {
+	return &Requests{req: gorequest.New().TLSClientConfig(&tls.Config{InsecureSkipVerify: true}), verbose: verbose}
+}
+
+func Request() *Requests {
+	return request
+}
+
+func printResponse(resp gorequest.Response, body []byte, errs []error) {
+	fmt.Println("===>", resp.Request.Method, resp.Request.URL)
+	for _, err := range errs {
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
+	fmt.Println("<=== Resp Status:", resp.Status)
+	fmt.Printf("<=== Resp Body: %s\n", string(body))
+	fmt.Println("<=== Done")
+}
 
-	req.Header("Content-type", "application/json")
+func (r *Requests) Get(url string) *Requests {
+	r.req.Get(url)
+	return r
+}
 
-	for hk, hv := range headers {
-		req.Header(hk, hv)
+func (r *Requests) AddHeader(header map[string]string) *Requests {
+	for param, value := range header {
+		r.req.Header.Set(param, value)
 	}
+	return r
+}
 
-	for pk, pv := range params {
-		req.Param(pk, pv)
+func (r *Requests) Post(url string, body interface{}) *Requests {
+	r.req.Post(url).Send(body)
+	return r
+}
+func (r *Requests) Put(url string, body interface{}) *Requests {
+	r.req.Put(url).Send(body)
+	return r
+}
+func (r *Requests) Delete(url string) *Requests {
+	r.req.Delete(url)
+	return r
+}
+
+func (r *Requests) EndBytes(callback ...func(response gorequest.Response, body []byte, errs []error)) (*http.Response, []byte, []error) {
+	if r.verbose {
+		callback = append(callback, printResponse)
 	}
+	return r.req.EndBytes(callback...)
+}
 
-	data, _ := json.Marshal(body)
-	req.Body(data)
-
-	resp, err := req.Response()
-	if err != nil {
-		logger.Error("request failed, due to ", err)
-		return
-	}
-	defer resp.Body.Close()
-	respData, err = ioutil.ReadAll(resp.Body)
-	logger.WithField("result", string(respData)).Debug()
-
-	if !common.Contains(whileCode, resp.StatusCode) {
-		logger.Error("error code:", resp.StatusCode)
-		logger.Error("fail reason: ", err)
-		err = errors.New(string(respData))
-		return
-	}
-	if resp.Body == nil {
-		return
-	}
-
-	return
+func (r *Requests) End(callback ...func(response gorequest.Response, body []byte, errs []error)) (*http.Response, string, []error) {
+	resp, body, errs := r.EndBytes(callback...)
+	bodyString := string(body)
+	return resp, bodyString, errs
 }

@@ -3,7 +3,7 @@ package common
 import (
 	"encoding/json"
 
-	"github.com/RosenLo/toolkits/structure/maps"
+	"github.com/rosenlo/toolkits/structure/maps"
 )
 
 func Contains(slice []int, item int) bool {

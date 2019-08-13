@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/RosenLo/toolkits/file"
+	"github.com/rosenlo/toolkits/file"
 )
 
 type CPU struct {

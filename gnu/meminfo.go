@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/RosenLo/toolkits/file"
+	"github.com/rosenlo/toolkits/file"
 )
 
 type Mem struct {
