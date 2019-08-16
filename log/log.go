@@ -4,73 +4,117 @@ import (
 	"os"
 	"sync"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/Sirupsen/logrus"
 )
+
+const TimeFormatFormat string = "2006-01-02 15:04:05"
 
 var (
-	Logger     *log.Entry
+	logger     = NewLogger()
 	loggerLock = new(sync.RWMutex)
-	fields     = log.Fields{}
+	fields     = logrus.Fields{}
 )
 
-func GetLogger() *log.Entry {
-	return Logger
+func GetLogger() *logrus.Entry {
+	return logger
 }
 
 func Init(level, appId string) (err error) {
-	log.SetFormatter(&log.JSONFormatter{})
-	log.SetOutput(os.Stdout)
+	logrus.SetFormatter(&logrus.TextFormatter{
+		DisableColors:   true,
+		FullTimestamp:   true,
+		TimestampFormat: TimeFormatFormat,
+	})
+	logrus.SetOutput(os.Stdout)
 
 	switch level {
 	case "info":
-		log.SetLevel(log.InfoLevel)
+		logrus.SetLevel(logrus.InfoLevel)
 	case "debug":
-		log.SetLevel(log.DebugLevel)
+		logrus.SetLevel(logrus.DebugLevel)
 	case "warn":
-		log.SetLevel(log.WarnLevel)
+		logrus.SetLevel(logrus.WarnLevel)
 	default:
-		log.Fatal("log conf only allow [info, debug, warn], please check your confguire")
+		logrus.Fatal("log conf only allow [info, debug, warn], please check your confguire")
 	}
-	SetLoggerField("appId", appId)
+	withField("appId", appId)
 
 	return
 }
 
-func SetLoggerField(key string, value interface{}) {
+func SetField(key string, value interface{}) {
 	loggerLock.Lock()
 	defer loggerLock.Unlock()
 	fields[key] = value
-	Logger = log.WithFields(fields)
+	logger = logger.WithFields(fields)
+}
+
+func withField(key string, value interface{}) {
+	loggerLock.Lock()
+	defer loggerLock.Unlock()
+	logger.Data[key] = value
+}
+
+func NewLogger() *logrus.Entry {
+	return logrus.StandardLogger().WithFields(fields)
+}
+
+func Clean() {
+	logger = NewLogger()
+}
+
+func WithField(key string, value interface{}) *logrus.Entry {
+	return logger.WithField(key, value)
+}
+
+func WithFields(fields map[string]interface{}) *logrus.Entry {
+	return logger.WithFields(logrus.Fields(fields))
 }
 
 func Println(args ...interface{}) {
-	Logger.Println(args...)
+	logger.Println(args...)
 }
 
 func Printf(format string, args ...interface{}) {
-	Logger.Printf(format, args...)
+	logger.Printf(format, args...)
 }
 
 func Info(args ...interface{}) {
-	Logger.Info(args...)
+	logger.Info(args...)
 }
 
 func Infof(format string, args ...interface{}) {
-	Logger.Infof(format, args...)
+	logger.Infof(format, args...)
+}
+
+func Warn(args ...interface{}) {
+	logger.Warn(args...)
+}
+
+func Warnf(format string, args ...interface{}) {
+	logger.Warnf(format, args...)
 }
 
 func Error(args ...interface{}) {
-	Logger.Error(args...)
+	logger.Error(args...)
 }
 
 func Errorf(format string, args ...interface{}) {
-	Logger.Errorf(format, args...)
+	logger.Errorf(format, args...)
 }
 
 func Debug(args ...interface{}) {
-	Logger.Debug(args...)
+	logger.Debug(args...)
 }
 
 func Debugf(format string, args ...interface{}) {
-	Logger.Debugf(format, args...)
+	logger.Debugf(format, args...)
+}
+
+func Fatal(args ...interface{}) {
+	logger.Fatal(args...)
+}
+
+func Fatalf(format string, args ...interface{}) {
+	logger.Fatalf(format, args...)
 }
