@@ -19,13 +19,17 @@ func GetLogger() *logrus.Entry {
 	return logger
 }
 
-func Init(level, appId string) (err error) {
+func Init(level, appID string, output *os.File) (err error) {
 	logrus.SetFormatter(&logrus.TextFormatter{
 		DisableColors:   true,
 		FullTimestamp:   true,
 		TimestampFormat: TimeFormatFormat,
 	})
-	logrus.SetOutput(os.Stdout)
+	if output == nil {
+		logrus.SetOutput(os.Stdout)
+	} else {
+		logrus.SetOutput(output)
+	}
 
 	switch level {
 	case "info":
@@ -37,7 +41,9 @@ func Init(level, appId string) (err error) {
 	default:
 		logrus.Fatal("log conf only allow [info, debug, warn], please check your confguire")
 	}
-	withField("appId", appId)
+	if appID != "" {
+		withField("AppID", appID)
+	}
 
 	return
 }
