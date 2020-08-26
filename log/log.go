@@ -7,7 +7,7 @@ import (
 	"github.com/Sirupsen/logrus"
 )
 
-const TimeFormatFormat string = "2006-01-02 15:04:05"
+const TimeFormatFormat string = "2006-01-02 15:04:05.000 Z0700"
 
 var (
 	logger     = NewLogger()
@@ -20,9 +20,7 @@ func GetLogger() *logrus.Entry {
 }
 
 func Init(level, appID string, output *os.File) (err error) {
-	logrus.SetFormatter(&logrus.TextFormatter{
-		DisableColors:   true,
-		FullTimestamp:   true,
+	logrus.SetFormatter(&logrus.JSONFormatter{
 		TimestampFormat: TimeFormatFormat,
 	})
 	if output == nil {
