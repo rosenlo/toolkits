@@ -5,6 +5,8 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -55,4 +57,33 @@ func ReadFile(filename string) ([]byte, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+func ReadFiles(root string) ([]string, error) {
+	var files []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func WriteBytes(filePath string, b []byte) (int, error) {
+	os.MkdirAll(path.Dir(filePath), os.ModePerm)
+	fw, err := os.Create(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer fw.Close()
+	return fw.Write(b)
+}
+
+func WriteString(filePath string, s string) (int, error) {
+	return WriteBytes(filePath, []byte(s))
 }
