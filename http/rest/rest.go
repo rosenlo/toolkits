@@ -30,7 +30,7 @@ func printResponse(rsp gorequest.Response, body []byte, errs []error) {
 	}
 	log.WithFields(map[string]interface{}{
 		"method":      rsp.Request.Method,
-		"url":         rsp.Request.URL,
+		"url":         rsp.Request.URL.Path,
 		"status":      rsp.Status,
 		"status_code": rsp.StatusCode,
 		// "response":    string(body),
