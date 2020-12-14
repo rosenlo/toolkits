@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/rosenlo/toolkits/log"
 
@@ -62,14 +63,21 @@ func (r *Request) Post(uri string, body interface{}) *Request {
 	r.req.Post(url).Send(body)
 	return r
 }
+
 func (r *Request) Put(uri string, body interface{}) *Request {
 	url := fmt.Sprintf("%s%s", r.baseURL, uri)
 	r.req.Put(url).Send(body)
 	return r
 }
+
 func (r *Request) Delete(uri string) *Request {
 	url := fmt.Sprintf("%s%s", r.baseURL, uri)
 	r.req.Delete(url)
+	return r
+}
+
+func (r *Request) Retry(retryerCount int, retryerTime time.Duration, statusCode ...int) *Request {
+	r.req.Retry(retryerCount, retryerTime, statusCode...)
 	return r
 }
 
