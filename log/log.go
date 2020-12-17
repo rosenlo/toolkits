@@ -20,8 +20,9 @@ func GetLogger() *logrus.Entry {
 }
 
 func Init(level, appID string, output *os.File) (err error) {
-	logrus.SetFormatter(&logrus.JSONFormatter{
+	logrus.SetFormatter(&logrus.TextFormatter{
 		TimestampFormat: TimeFormatFormat,
+		DisableColors:   true,
 	})
 	if output == nil {
 		logrus.SetOutput(os.Stdout)
