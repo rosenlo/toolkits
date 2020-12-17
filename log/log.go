@@ -4,7 +4,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 const TimeFormatFormat string = "2006-01-02 15:04:05.000 Z0700"
