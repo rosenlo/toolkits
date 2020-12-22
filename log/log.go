@@ -21,7 +21,14 @@ func GetLogger() *logrus.Entry {
 }
 
 func Init(level string, formatter logrus.Formatter, output io.Writer) {
-	logrus.SetFormatter(formatter)
+	if formatter == nil {
+		logrus.SetFormatter(&logrus.TextFormatter{
+			TimestampFormat: TimeFormatFormat,
+			DisableColors:   true,
+		})
+	} else {
+		logrus.SetFormatter(formatter)
+	}
 	if output == nil {
 		logrus.SetOutput(os.Stdout)
 	} else {
