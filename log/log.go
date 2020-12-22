@@ -1,6 +1,7 @@
 package log
 
 import (
+	"io"
 	"os"
 	"sync"
 
@@ -19,11 +20,8 @@ func GetLogger() *logrus.Entry {
 	return logger
 }
 
-func Init(level, appID string, output *os.File) (err error) {
-	logrus.SetFormatter(&logrus.TextFormatter{
-		TimestampFormat: TimeFormatFormat,
-		DisableColors:   true,
-	})
+func Init(level string, formatter logrus.Formatter, output io.Writer) {
+	logrus.SetFormatter(formatter)
 	if output == nil {
 		logrus.SetOutput(os.Stdout)
 	} else {
@@ -39,9 +37,6 @@ func Init(level, appID string, output *os.File) (err error) {
 		logrus.SetLevel(logrus.WarnLevel)
 	default:
 		logrus.Fatal("log conf only allow [info, debug, warn], please check your confguire")
-	}
-	if appID != "" {
-		withField("AppID", appID)
 	}
 
 	return
