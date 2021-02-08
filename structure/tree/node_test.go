@@ -1,4 +1,4 @@
-package trees
+package tree
 
 import (
 	"reflect"
@@ -11,6 +11,13 @@ func TestInts2TreeNode(t *testing.T) {
 		{1, 1, 2},
 		{1, 2, 3, 4, 5},
 		{},
+		{3, 9, 20, NULL, NULL, 15, 7},
+		{
+			3,
+			4, 5,
+			-7, -6, NULL, NULL,
+			-7, NULL, -5, NULL, NULL, NULL, -4,
+		},
 	}
 	for i := 0; i < len(tests); i++ {
 		node := Ints2TreeNode(tests[i])
