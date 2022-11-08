@@ -3,7 +3,7 @@ package common
 import (
 	"encoding/json"
 
-	"github.com/rosenlo/toolkits/structure/maps"
+	"github.com/rosenlo/toolkits/structure/stringmap"
 )
 
 func Contains(slice []int, item int) bool {
@@ -16,7 +16,7 @@ func Contains(slice []int, item int) bool {
 }
 
 func DuplicateRemove(slice []string) []string {
-	users := maps.NewStringMap()
+	users := stringmap.New()
 	for _, element := range slice {
 		users.Add(element)
 	}
