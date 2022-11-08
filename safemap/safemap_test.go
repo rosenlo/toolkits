@@ -37,7 +37,7 @@ func TestSafeMap(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 	for i := range tests {
-		value, result := m.Get(tests[i].key)
-		assert.Equal(tests[i].result, result, "Actual value:%v", value)
+		_, result := m.Get(tests[i].key)
+		assert.Equal(tests[i].result, result)
 	}
 }
