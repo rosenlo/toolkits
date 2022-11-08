@@ -8,6 +8,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.7.0
 	github.com/smartystreets/goconvey v1.6.4 // indirect
+	github.com/stretchr/testify v1.2.2
 	golang.org/x/net v0.0.0-20201216054612-986b41b23924 // indirect
 	moul.io/http2curl v1.0.0 // indirect
 )
