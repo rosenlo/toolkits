@@ -16,22 +16,22 @@ const (
 
 var DefaultTransport = &http.Transport{
 	MaxIdleConnsPerHost: DefaultMaxIdleConnsPerHost,
-	Dial: (&net.Dialer{
+	DialContext: (&net.Dialer{
 		Timeout:   DefaultDialTimeout,
 		KeepAlive: DefaultKeepAliveTimeout,
-	}).Dial,
+	}).DialContext,
 }
 
-type HttpClient struct {
+type Client struct {
 	client *http.Client
 	header map[string]string
 }
 
-func New(transport *http.Transport) *HttpClient {
+func New(transport *http.Transport) *Client {
 	if transport == nil {
 		transport = DefaultTransport
 	}
-	return &HttpClient{
+	return &Client{
 		client: &http.Client{
 			Transport: transport,
 		},
@@ -39,7 +39,7 @@ func New(transport *http.Transport) *HttpClient {
 	}
 }
 
-func (s *HttpClient) Request(method, url string, header map[string]string, body []byte) (rsp *http.Response, respBody []byte, err error) {
+func (s *Client) Request(method, url string, header map[string]string, body []byte) (rsp *http.Response, respBody []byte, err error) {
 	var req *http.Request
 	if body != nil {
 		req, err = http.NewRequest(method, url, bytes.NewReader(body))
@@ -47,11 +47,11 @@ func (s *HttpClient) Request(method, url string, header map[string]string, body 
 		req, err = http.NewRequest(method, url, nil)
 	}
 
-	req.Close = true
-
 	if err != nil {
 		return
 	}
+
+	req.Close = true
 
 	for key, value := range header {
 		req.Header.Set(key, value)
