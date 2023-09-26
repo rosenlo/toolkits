@@ -2,7 +2,8 @@ package httpclient
 
 import (
 	"bytes"
-	"io/ioutil"
+	"context"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -24,7 +25,8 @@ var DefaultTransport = &http.Transport{
 
 type Client struct {
 	client *http.Client
-	header map[string]string
+	user   string
+	pwd    string
 }
 
 func New(transport *http.Transport) *Client {
@@ -35,26 +37,44 @@ func New(transport *http.Transport) *Client {
 		client: &http.Client{
 			Transport: transport,
 		},
-		header: make(map[string]string),
 	}
 }
 
+func (s *Client) WithTimeout(timeout time.Duration) {
+	s.client.Timeout = timeout
+}
+
+func (s *Client) WithBasicAuth(user, pwd string) {
+	s.user = user
+	s.pwd = pwd
+}
+
 func (s *Client) Request(method, url string, header map[string]string, body []byte) (rsp *http.Response, respBody []byte, err error) {
+	return s.RequestWithContext(context.Background(), method, url, header, body)
+}
+
+func (s *Client) RequestWithContext(ctx context.Context, method, url string, header map[string]string, body []byte) (rsp *http.Response, respBody []byte, err error) {
 	var req *http.Request
 	if body != nil {
-		req, err = http.NewRequest(method, url, bytes.NewReader(body))
+		req, err = http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	} else {
-		req, err = http.NewRequest(method, url, nil)
+		req, err = http.NewRequestWithContext(ctx, method, url, nil)
 	}
 
 	if err != nil {
 		return
 	}
 
-	req.Close = true
+	if len(s.user) != 0 && len(s.pwd) != 0 {
+		req.SetBasicAuth(s.user, s.pwd)
+	}
 
 	for key, value := range header {
 		req.Header.Set(key, value)
+	}
+
+	if value, exists := header["Host"]; exists {
+		req.Host = value
 	}
 
 	rsp, err = s.client.Do(req)
@@ -64,7 +84,7 @@ func (s *Client) Request(method, url string, header map[string]string, body []by
 
 	defer rsp.Body.Close()
 
-	respBody, err = ioutil.ReadAll(rsp.Body)
+	respBody, err = io.ReadAll(rsp.Body)
 
 	return
 }
