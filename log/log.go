@@ -1,127 +1,140 @@
 package log
 
 import (
-	"io"
-	"os"
-	"sync"
+	"fmt"
+	"time"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-const TimeFormatFormat string = "2006-01-02 15:04:05.000 Z0700"
+// Logger is service logger
+type Logger struct {
+	*zap.Logger
+}
+
+// With fields to output
+func (l *Logger) With(fields ...zap.Field) *Logger {
+	return &Logger{
+		Logger: l.Logger.With(fields...),
+	}
+}
+
+// Info is logging info
+func (l *Logger) Info(msg string) {
+	l.Logger.Info(msg)
+}
+
+// Infof is logging info with printf format
+func (l *Logger) Infof(fmtStr string, msgs ...interface{}) {
+	msg := fmt.Sprintf(fmtStr, msgs...)
+	l.Logger.Info(msg)
+}
+
+// Error is logging error
+func (l *Logger) Error(msg string) {
+	l.Logger.Error(msg)
+}
+
+// Errorf is logging error with printf format
+func (l *Logger) Errorf(fmtStr string, msgs ...interface{}) {
+	msg := fmt.Sprintf(fmtStr, msgs...)
+	l.Logger.Error(msg)
+}
+
+// Warn is logging warn
+func (l *Logger) Warn(msg string) {
+	l.Logger.Warn(msg)
+}
+
+// Warnf is logging warn with printf format
+func (l *Logger) Warnf(fmtStr string, msgs ...interface{}) {
+	msg := fmt.Sprintf(fmtStr, msgs...)
+	l.Logger.Warn(msg)
+}
+
+// Debug is logging debug
+func (l *Logger) Debug(msg string, fields ...zap.Field) {
+	l.Logger.Debug(msg, fields...)
+}
+
+// Debugf is logging debug with printf format
+func (l *Logger) Debugf(fmtStr string, msgs ...interface{}) {
+	msg := fmt.Sprintf(fmtStr, msgs...)
+	l.Logger.Debug(msg)
+}
+
+// timeEncoder specifics the time format
+func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(t.UTC().Format(time.RFC3339))
+}
 
 var (
-	logger     = NewLogger()
-	loggerLock = new(sync.RWMutex)
-	fields     = logrus.Fields{}
+	defaultLogger *Logger
 )
 
-func GetLogger() *logrus.Entry {
-	return logger
-}
-
-func Init(level string, formatter logrus.Formatter, output io.Writer) {
-	if formatter == nil {
-		logrus.SetFormatter(&logrus.TextFormatter{
-			TimestampFormat: TimeFormatFormat,
-			DisableColors:   true,
-		})
-	} else {
-		logrus.SetFormatter(formatter)
+// init init logger with zap
+func init() {
+	logConfig := zap.NewProductionConfig()
+	logConfig.EncoderConfig.EncodeTime = timeEncoder
+	logConfig.EncoderConfig.TimeKey = "time"
+	logConfig.Level.SetLevel(zap.DebugLevel)
+	zapLogger, err := logConfig.Build(zap.AddCallerSkip(2))
+	if err != nil {
+		panic(err)
 	}
-	if output == nil {
-		logrus.SetOutput(os.Stdout)
-	} else {
-		logrus.SetOutput(output)
+	defaultLogger = &Logger{
+		Logger: zapLogger,
 	}
+}
 
-	switch level {
-	case "info":
-		logrus.SetLevel(logrus.InfoLevel)
-	case "debug":
-		logrus.SetLevel(logrus.DebugLevel)
-	case "warn":
-		logrus.SetLevel(logrus.WarnLevel)
-	default:
-		logrus.Fatal("log conf only allow [info, debug, warn], please check your confguire")
+// With fields to output by default logger
+func With(fields ...zap.Field) *Logger {
+	return &Logger{
+		Logger: defaultLogger.Logger.With(fields...),
 	}
-
-	return
 }
 
-func SetField(key string, value interface{}) {
-	loggerLock.Lock()
-	defer loggerLock.Unlock()
-	fields[key] = value
-	logger = logger.WithFields(fields)
+// Info is logging info
+func Info(msg string) {
+	defaultLogger.Info(msg)
 }
 
-func withField(key string, value interface{}) {
-	loggerLock.Lock()
-	defer loggerLock.Unlock()
-	logger.Data[key] = value
+// Infof is logging info with printf format
+func Infof(fmtStr string, msgs ...interface{}) {
+	msg := fmt.Sprintf(fmtStr, msgs...)
+	defaultLogger.Info(msg)
 }
 
-func NewLogger() *logrus.Entry {
-	return logrus.StandardLogger().WithFields(fields)
+// Error is logging error
+func Error(msg string) {
+	defaultLogger.Error(msg)
 }
 
-func Clean() {
-	logger = NewLogger()
+// Errorf is logging error with printf format
+func Errorf(fmtStr string, msgs ...interface{}) {
+	msg := fmt.Sprintf(fmtStr, msgs...)
+	defaultLogger.Error(msg)
 }
 
-func WithField(key string, value interface{}) *logrus.Entry {
-	return logger.WithField(key, value)
+// Warn is logging warn
+func Warn(msg string) {
+	defaultLogger.Warn(msg)
 }
 
-func WithFields(fields map[string]interface{}) *logrus.Entry {
-	return logger.WithFields(logrus.Fields(fields))
+// Warnf is logging warn with printf format
+func Warnf(fmtStr string, msgs ...interface{}) {
+	msg := fmt.Sprintf(fmtStr, msgs...)
+	defaultLogger.Warn(msg)
 }
 
-func Println(args ...interface{}) {
-	logger.Println(args...)
+// Debug is logging debug
+func Debug(msg string, fields ...zap.Field) {
+	defaultLogger.Debug(msg, fields...)
 }
 
-func Printf(format string, args ...interface{}) {
-	logger.Printf(format, args...)
-}
-
-func Info(args ...interface{}) {
-	logger.Info(args...)
-}
-
-func Infof(format string, args ...interface{}) {
-	logger.Infof(format, args...)
-}
-
-func Warn(args ...interface{}) {
-	logger.Warn(args...)
-}
-
-func Warnf(format string, args ...interface{}) {
-	logger.Warnf(format, args...)
-}
-
-func Error(args ...interface{}) {
-	logger.Error(args...)
-}
-
-func Errorf(format string, args ...interface{}) {
-	logger.Errorf(format, args...)
-}
-
-func Debug(args ...interface{}) {
-	logger.Debug(args...)
-}
-
-func Debugf(format string, args ...interface{}) {
-	logger.Debugf(format, args...)
-}
-
-func Fatal(args ...interface{}) {
-	logger.Fatal(args...)
-}
-
-func Fatalf(format string, args ...interface{}) {
-	logger.Fatalf(format, args...)
+// Debugf is logging debug with printf format
+func Debugf(fmtStr string, msgs ...interface{}) {
+	msg := fmt.Sprintf(fmtStr, msgs...)
+	defaultLogger.Debug(msg)
 }
