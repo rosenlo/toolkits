@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -48,6 +46,12 @@ func NewClient(cfg Config, opts ...Option) *Client {
 func WithBasicAuth(user, pwd string) Option {
 	return func(c *Client) {
 		c.client.WithBasicAuth(user, pwd)
+	}
+}
+
+func WithHttpClient(client *httpclient.Client) Option {
+	return func(c *Client) {
+		c.client = client
 	}
 }
 
@@ -141,15 +145,11 @@ func MetricFormatter(metric, job string, value any, timestamp int64, labels map[
 func (c *Client) Import(ctx context.Context, payload string) error {
 	_url := fmt.Sprintf("%s%s", c.cfg.InsertAddress, V1Import)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", _url, strings.NewReader(payload))
-
-	if err != nil {
-		return fmt.Errorf("failed to new request: %v req body: %s", err, payload)
+	headers := map[string]string{
+		"Content-Type": "application/x-www-form-urlencoded",
 	}
+	resp, respBody, err := c.client.RequestWithContext(ctx, "POST", _url, headers, []byte(payload))
 
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to request: %v req body: %s", err, payload)
 	}
@@ -158,12 +158,5 @@ func (c *Client) Import(ctx context.Context, payload string) error {
 		return nil
 	}
 
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read resp body: %v req body: %s", err, payload)
-	}
-
-	return fmt.Errorf("vmagent returned error: %s req body: %s", body, payload)
+	return fmt.Errorf("vmagent returned error: %s req body: %s", respBody, payload)
 }
