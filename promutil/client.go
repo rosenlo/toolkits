@@ -18,6 +18,7 @@ const (
 	V1QueryRange  = "/api/v1/query_range"
 	V1LabelValues = "/api/v1/label/%s/values"
 	V1Import      = "/api/v1/import/prometheus"
+	V1Write       = "/api/v1/write"
 )
 
 type Option func(*Client)
@@ -159,4 +160,23 @@ func (c *Client) Import(ctx context.Context, payload string) error {
 	}
 
 	return fmt.Errorf("vmagent returned error: %s req body: %s", respBody, payload)
+}
+
+func (c *Client) Write(ctx context.Context, payload []byte) error {
+	_url := fmt.Sprintf("%s%s", c.cfg.InsertAddress, V1Write)
+
+	headers := map[string]string{
+		"Content-Type": "application/x-protobuf",
+	}
+	resp, respBody, err := c.client.RequestWithContext(ctx, "POST", _url, headers, payload)
+
+	if err != nil {
+		return fmt.Errorf("failed to request: %v", err)
+	}
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+
+	return fmt.Errorf("vmagent returned error: %s", respBody)
 }
