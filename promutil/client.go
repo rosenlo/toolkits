@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/rosenlo/toolkits/http/httpclient"
+
+	"github.com/golang/snappy"
 )
 
 const (
@@ -168,7 +170,7 @@ func (c *Client) Write(ctx context.Context, payload []byte) error {
 	headers := map[string]string{
 		"Content-Type": "application/x-protobuf",
 	}
-	resp, respBody, err := c.client.RequestWithContext(ctx, "POST", _url, headers, payload)
+	resp, respBody, err := c.client.RequestWithContext(ctx, "POST", _url, headers, snappy.Encode(nil, payload))
 
 	if err != nil {
 		return fmt.Errorf("failed to request: %v", err)
