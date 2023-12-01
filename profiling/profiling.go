@@ -10,8 +10,17 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
+
+var (
+	usedPercentage = atomic.Uint32{}
+)
+
+func GetUsedPercentage() uint32 {
+	return usedPercentage.Load()
+}
 
 func HeapDump(dumpFile string) {
 	f, err := os.Create(dumpFile)
@@ -92,10 +101,11 @@ func MonitorMemoryUsage(memoryUsageThreshold float64, serverURL string, sleepInt
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 		used := m.Alloc
-		usedPercentage := float64(used) / float64(limit)
+		usedPct := float64(used) / float64(limit)
+		usedPercentage.Store(uint32(usedPct))
 
-		if usedPercentage > memoryUsageThreshold {
-			log.Printf("Memory usage: %.2f%% exceeds the threshold %.0f%%.\n", usedPercentage*100, memoryUsageThreshold*100)
+		if usedPct > memoryUsageThreshold {
+			log.Printf("Memory usage: %.2f%% exceeds the threshold %.0f%%.\n", usedPct*100, memoryUsageThreshold*100)
 			err := HeapDumpAndSendToServer(serverURL)
 			if err != nil {
 				log.Printf("Error sending heap dump: %v\n", err)
