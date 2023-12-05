@@ -10,16 +10,15 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
 var (
-	usedPercentage = atomic.Uint32{}
+	usedPercentage float64
 )
 
-func GetUsedPercentage() uint32 {
-	return usedPercentage.Load()
+func GetUsedPercentage() float64 {
+	return usedPercentage
 }
 
 func HeapDump(dumpFile string) {
@@ -102,7 +101,7 @@ func MonitorMemoryUsage(memoryUsageThreshold float64, serverURL string, sleepInt
 		runtime.ReadMemStats(&m)
 		used := m.Alloc
 		usedPct := float64(used) / float64(limit)
-		usedPercentage.Store(uint32(usedPct))
+		usedPercentage = usedPct
 
 		if usedPct > memoryUsageThreshold {
 			log.Printf("Memory usage: %.2f%% exceeds the threshold %.0f%%.\n", usedPct*100, memoryUsageThreshold*100)
