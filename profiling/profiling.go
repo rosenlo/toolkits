@@ -93,7 +93,7 @@ func GetMemoryLimit() (uint64, error) {
 	return limit, nil
 }
 
-func MonitorMemoryUsage(memoryUsageThreshold float64, serverURL string, sleepInterval time.Duration) {
+func MonitorMemoryUsage(memoryUsageThreshold float64, serverURL string, sleepInterval time.Duration, callback chan struct{}) {
 	limit, err := GetMemoryLimit()
 	if err != nil {
 		log.Printf("Failed to read cgroup memory limit: %v", err)
@@ -114,6 +114,7 @@ func MonitorMemoryUsage(memoryUsageThreshold float64, serverURL string, sleepInt
 				log.Printf("Error sending heap dump: %v\n", err)
 			}
 			log.Printf("dump heap done")
+			callback <- struct{}{}
 		}
 		time.Sleep(sleepInterval)
 	}
