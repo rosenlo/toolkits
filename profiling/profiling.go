@@ -13,11 +13,16 @@ import (
 	"time"
 )
 
-var (
-	usedPercentage float64
-)
-
 func GetUsedPercentage() float64 {
+	limit, err := GetMemoryLimit()
+	if err != nil {
+		log.Printf("Failed to read cgroup memory limit: %v", err)
+		return 0.0
+	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	used := m.Alloc
+	usedPercentage := float64(used) / float64(limit)
 	return usedPercentage
 }
 
@@ -100,11 +105,10 @@ func MonitorMemoryUsage(memoryUsageThreshold float64, serverURL string, sleepInt
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 		used := m.Alloc
-		usedPct := float64(used) / float64(limit)
-		usedPercentage = usedPct
+		usedPercentage := float64(used) / float64(limit)
 
-		if usedPct > memoryUsageThreshold {
-			log.Printf("Memory usage: %.2f%% exceeds the threshold %.0f%%.\n", usedPct*100, memoryUsageThreshold*100)
+		if usedPercentage > memoryUsageThreshold {
+			log.Printf("Memory usage: %.2f%% exceeds the threshold %.0f%%.\n", usedPercentage*100, memoryUsageThreshold*100)
 			err := HeapDumpAndSendToServer(serverURL)
 			if err != nil {
 				log.Printf("Error sending heap dump: %v\n", err)
