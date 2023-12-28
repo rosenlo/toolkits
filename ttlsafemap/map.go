@@ -43,6 +43,15 @@ func (c *Cache) Delete(key string) {
 	c.syncMap.Delete(key)
 }
 
+func (c *Cache) Keys() []string {
+	keys := make([]string, 0)
+	c.syncMap.Range(func(key, value interface{}) bool {
+		keys = append(keys, key.(string))
+		return true
+	})
+	return keys
+}
+
 func (c *Cache) StartCleanupTimer(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
