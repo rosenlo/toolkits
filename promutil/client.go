@@ -17,6 +17,7 @@ import (
 
 const (
 	V1Export      = "/api/v1/export"
+	V1Query       = "/api/v1/query"
 	V1QueryRange  = "/api/v1/query_range"
 	V1LabelValues = "/api/v1/label/%s/values"
 	V1Import      = "/api/v1/import/prometheus"
@@ -79,6 +80,35 @@ func (c *Client) Export(metric string, start, end int64) ([]byte, error) {
 		return nil, fmt.Errorf("failed to request %s resp: %s; err: %v", V1Export, string(respBody), err)
 	}
 	return respBody, nil
+}
+
+func (c *Client) Query(metric string, start time.Time, step string) (*QueryResponse, error) {
+	var response QueryResponse
+	v := url.Values{}
+	v.Add("query", metric)
+	if start.Second() != 0 {
+		v.Add("time", start.Format(time.RFC3339))
+	}
+	if len(step) != 0 {
+		v.Add("step", step)
+	}
+
+	_url := fmt.Sprintf("%s%s?%s", c.cfg.Address, V1Query, v.Encode())
+
+	headers := map[string]string{
+		"Content-Type": "application/x-www-form-urlencoded",
+	}
+	resp, respBody, err := c.client.Request("GET", _url, headers, nil)
+	if err != nil || resp.StatusCode > 399 {
+		log.Printf("---> request: %s", _url)
+		log.Printf("<--- response status: %s", resp.Status)
+		return nil, fmt.Errorf("failed to request %s resp: %s; err: %v", V1Query, string(respBody), err)
+	}
+	err = json.Unmarshal(respBody, &response)
+	if err != nil {
+		return nil, err
+	}
+	return &response, nil
 }
 
 func (c *Client) QueryRange(metric string, start, end time.Time, step string) (*QueryRangeResponse, error) {

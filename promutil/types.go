@@ -6,6 +6,16 @@ type Sample struct {
 	Timestamps []int64           `json:"timestamps"`
 }
 
+type QueryResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		Result []struct {
+			Metric map[string]string `json:"metric"`
+			Values [][]any           `json:"values"`
+		}
+	}
+}
+
 type QueryRangeResponse struct {
 	Status string `json:"status"`
 	Data   struct {
