@@ -11,7 +11,7 @@ type QueryResponse struct {
 	Data   struct {
 		Result []struct {
 			Metric map[string]string `json:"metric"`
-			Values []any             `json:"values"`
+			Value  []any             `json:"value"`
 		}
 	}
 }
