@@ -99,7 +99,10 @@ func (c *Client) Query(metric string, start time.Time, step string) (*QueryRespo
 		"Content-Type": "application/x-www-form-urlencoded",
 	}
 	resp, respBody, err := c.client.Request("GET", _url, headers, nil)
-	if err != nil || resp.StatusCode > 399 {
+	if err != nil {
+		return nil, fmt.Errorf("failed to request: %v", err)
+	}
+	if resp.StatusCode > 399 {
 		log.Printf("---> request: %s", _url)
 		log.Printf("<--- response status: %s", resp.Status)
 		return nil, fmt.Errorf("failed to request %s resp: %s; err: %v", V1Query, string(respBody), err)
@@ -127,7 +130,10 @@ func (c *Client) QueryRange(metric string, start, end time.Time, step string) (*
 		"Content-Type": "application/x-www-form-urlencoded",
 	}
 	resp, respBody, err := c.client.Request("GET", _url, headers, nil)
-	if err != nil || resp.StatusCode > 399 {
+	if err != nil {
+		return nil, fmt.Errorf("failed to request: %v", err)
+	}
+	if resp.StatusCode > 399 {
 		log.Printf("---> request: %s", _url)
 		log.Printf("<--- response status: %s", resp.Status)
 		return nil, fmt.Errorf("failed to request %s resp: %s; err: %v", V1QueryRange, string(respBody), err)
@@ -152,7 +158,10 @@ func (c *Client) LabelValues(label string, match string) (*LabelValuesResponse, 
 		"Content-Type": "application/x-www-form-urlencoded",
 	}
 	resp, respBody, err := c.client.Request("GET", _url, headers, nil)
-	if err != nil || resp.StatusCode > 399 {
+	if err != nil {
+		return nil, fmt.Errorf("failed to request: %v", err)
+	}
+	if resp.StatusCode > 399 {
 		log.Printf("---> request: %s", _url)
 		log.Printf("<--- response status: %s", resp.Status)
 		return nil, fmt.Errorf("failed to request %s resp: %s; err: %v", path, string(respBody), err)
