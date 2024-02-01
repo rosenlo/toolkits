@@ -8,6 +8,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+type Vector interface {
+	prometheus.Collector
+	Reset()
+}
+
 const (
 	ErrorMetricNameSuffix = "errors_total"
 )
@@ -68,4 +73,48 @@ func NewErrorCounterVec(name, help string, labels []string) (*prometheus.Counter
 	}
 
 	return metric, nil
+}
+
+func NewCounterVec(name, help string, labels []string) (*prometheus.CounterVec, error) {
+	log.Debugf("[%s] register with labels: %v", name, labels)
+	metric := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: name,
+			Help: help,
+		},
+		labels,
+	)
+
+	if err := prometheus.Register(metric); err != nil {
+		return nil, fmt.Errorf("[%s] failed to register: %w", name, err)
+	}
+
+	return metric, nil
+}
+
+func ResetIfReached(vec Vector, limit int) {
+	ch := make(chan prometheus.Metric, 1024)
+	cch := ch
+	count := 0
+
+	go func() {
+		vec.Collect(ch)
+		close(ch)
+	}()
+	for {
+		select {
+		case _, ok := <-cch:
+			if !ok {
+				cch = nil
+				break
+			}
+			count++
+		}
+		if cch == nil {
+			break
+		}
+	}
+	if count >= limit {
+		vec.Reset()
+	}
 }
