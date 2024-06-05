@@ -221,3 +221,11 @@ func (c *Client) Write(ctx context.Context, payload []byte) error {
 
 	return fmt.Errorf("vmagent returned error: %s", respBody)
 }
+
+func (c *Client) GetSelectAddress() string {
+	return c.cfg.Address
+}
+
+func (c *Client) GetInsertAddress() string {
+	return c.cfg.InsertAddress
+}
