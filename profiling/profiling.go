@@ -82,11 +82,29 @@ func HeapDumpAndSendToServer(serverURL string) error {
 }
 
 func GetMemoryLimit() (uint64, error) {
-	data, err := os.ReadFile("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+	data, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
 		return 0, err
 	}
-	limit, err := strconv.ParseUint(string(data[:len(data)-1]), 10, 64)
+	var memoryCgroupPath string
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.Split(line, ":")
+		if len(parts) == 3 && strings.Contains(parts[1], "memory") {
+			memoryCgroupPath = parts[2]
+			break
+		}
+	}
+
+	if len(memoryCgroupPath) == 0 {
+		return 0, fmt.Errorf("memory cgroup path not found")
+	}
+	memoryLimitPath := "/sys/fs/cgroup/memory" + memoryCgroupPath + "/memory.limit_in_bytes"
+	content, err := os.ReadFile(memoryLimitPath)
+	if err != nil {
+		return 0, err
+	}
+
+	limit, err := strconv.ParseUint(string(content[:len(content)-1]), 10, 64)
 	if err != nil {
 		return 0, err
 	}

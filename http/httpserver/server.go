@@ -48,7 +48,7 @@ func (s *Server) Start() {
 		log.Error("Http Server stopped unexpected")
 		s.Shutdown()
 	} else {
-		log.Error("Http Server stopped")
+		log.Info("Http Server stopped")
 	}
 }
 
