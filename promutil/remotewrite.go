@@ -14,16 +14,6 @@ import (
 	"github.com/rosenlo/toolkits/log"
 )
 
-const (
-	MetricWriteRows     = "remote_write_rows"
-	MetricWriteDuration = "remote_write_duration_seconds"
-)
-
-var (
-	writeRows, _     = NewGaugeVec(MetricWriteRows, "Total data points of remote write", []string{})
-	writeDuration, _ = NewGaugeVec(MetricWriteDuration, "The total time spent writing data points", []string{})
-)
-
 var (
 	fqNameRe = regexp.MustCompile(`fqName: "([^"]*)"`)
 )
@@ -93,30 +83,29 @@ func BuildWriteRequest(ch chan prometheus.Metric, jobName, instance string) *pro
 	return req
 }
 
-func BatchRemoteWrite(promClient *Client, req *prompb.WriteRequest, batch int) {
-	start := time.Now()
+func BatchRemoteWrite(ctx context.Context, promClient *Client, req *prompb.WriteRequest, batch int) error {
 	ts := req.Timeseries
 
+	r := &prompb.WriteRequest{}
+	defer r.Reset()
 	for i := 0; i < len(ts); i += batch {
 		if i+batch > len(ts) {
-			req.Timeseries = ts[i:]
+			r.Timeseries = ts[i:]
 		} else {
-			req.Timeseries = ts[i : i+batch]
+			r.Timeseries = ts[i : i+batch]
 		}
 
-		data, err := proto.Marshal(req)
+		data, err := proto.Marshal(r)
 		if err != nil {
-			log.Warnf(err.Error())
-			continue
+			return err
 		}
-		err = promClient.Write(context.TODO(), data)
+		err = promClient.Write(ctx, data)
 		if err != nil {
-			log.Warnf(err.Error())
-			continue
+			return err
 		}
 	}
-	writeRows.WithLabelValues().Set(float64(len(ts)))
-	writeDuration.WithLabelValues().Set(time.Since(start).Seconds())
+
+	return nil
 }
 
 func FillCounter(
