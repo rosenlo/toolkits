@@ -18,13 +18,13 @@ func NewCache() Cache {
 	return Cache{}
 }
 
-func (c *Cache) Set(key string, value any, ttl time.Duration) {
+func (c *Cache) Set(key any, value any, ttl time.Duration) {
 	expiration := time.Now().Add(ttl).UnixNano()
 	item := Item{Value: value, Expiration: expiration}
 	c.syncMap.Store(key, item)
 }
 
-func (c *Cache) Get(key string) (any, bool) {
+func (c *Cache) Get(key any) (any, bool) {
 	value, ok := c.syncMap.Load(key)
 	if !ok {
 		return nil, false
@@ -39,14 +39,14 @@ func (c *Cache) Get(key string) (any, bool) {
 	return item.Value, ok
 }
 
-func (c *Cache) Delete(key string) {
+func (c *Cache) Delete(key any) {
 	c.syncMap.Delete(key)
 }
 
-func (c *Cache) Keys() []string {
-	keys := make([]string, 0)
-	c.syncMap.Range(func(key, value interface{}) bool {
-		keys = append(keys, key.(string))
+func (c *Cache) Keys() []any {
+	keys := make([]any, 0)
+	c.syncMap.Range(func(key, value any) bool {
+		keys = append(keys, key)
 		return true
 	})
 	return keys
@@ -59,7 +59,7 @@ func (c *Cache) StartCleanupTimer(interval time.Duration) {
 			c.syncMap.Range(func(key, value any) bool {
 				item := value.(Item)
 				if time.Now().UnixNano() > item.Expiration {
-					c.Delete(key.(string))
+					c.Delete(key)
 					return true
 				}
 				return false
