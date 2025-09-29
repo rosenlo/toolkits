@@ -21,7 +21,7 @@ var DefBuckets = []float64{.001, .0015, .002, .003, .005, .01, .025, .05, .1, .2
 
 func NewHistogramVec(name, help string, buckets []float64, labels []string) (*prometheus.HistogramVec, error) {
 	log.Debugf("[%s] register with labels: %v", name, labels)
-	if len(buckets) != 0 {
+	if len(buckets) == 0 {
 		buckets = DefBuckets
 	}
 	metric := prometheus.NewHistogramVec(
