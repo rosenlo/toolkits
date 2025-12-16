@@ -86,28 +86,66 @@ func GetMemoryLimit() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	var memoryCgroupPath string
+
+	var cgroupPath string
+	var isCgroupV2 bool
+
+	// Parse /proc/self/cgroup to determine cgroup version and path
 	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
 		parts := strings.Split(line, ":")
-		if len(parts) == 3 && strings.Contains(parts[1], "memory") {
-			memoryCgroupPath = parts[2]
+		if len(parts) != 3 {
+			continue
+		}
+
+		// cgroup v2: format is "0::/path"
+		if parts[0] == "0" && parts[1] == "" {
+			cgroupPath = parts[2]
+			isCgroupV2 = true
+			break
+		}
+
+		// cgroup v1: format is "hierarchy-ID:controller-list:path"
+		if strings.Contains(parts[1], "memory") {
+			cgroupPath = parts[2]
+			isCgroupV2 = false
 			break
 		}
 	}
 
-	if len(memoryCgroupPath) == 0 {
-		return 0, fmt.Errorf("memory cgroup path not found")
-	}
-	memoryLimitPath := "/sys/fs/cgroup/memory" + memoryCgroupPath + "/memory.limit_in_bytes"
-	content, err := os.ReadFile(memoryLimitPath)
-	if err != nil {
-		return 0, err
+	if len(cgroupPath) == 0 {
+		return 0, fmt.Errorf("cgroup path not found")
 	}
 
-	limit, err := strconv.ParseUint(string(content[:len(content)-1]), 10, 64)
-	if err != nil {
-		return 0, err
+	var memoryLimitPath string
+	if isCgroupV2 {
+		// cgroup v2: /sys/fs/cgroup/<path>/memory.max
+		memoryLimitPath = "/sys/fs/cgroup" + cgroupPath + "/memory.max"
+	} else {
+		// cgroup v1: /sys/fs/cgroup/memory/<path>/memory.limit_in_bytes
+		memoryLimitPath = "/sys/fs/cgroup/memory" + cgroupPath + "/memory.limit_in_bytes"
 	}
+
+	content, err := os.ReadFile(memoryLimitPath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read %s: %w", memoryLimitPath, err)
+	}
+
+	limitStr := strings.TrimSpace(string(content))
+
+	// cgroup v2 uses "max" for unlimited, treat as a very large number
+	if limitStr == "max" {
+		// Return a large value (e.g., 1TB) or system memory
+		return 1024 * 1024 * 1024 * 1024, nil
+	}
+
+	limit, err := strconv.ParseUint(limitStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse memory limit: %w", err)
+	}
+
 	return limit, nil
 }
 
