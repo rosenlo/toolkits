@@ -120,15 +120,24 @@ func GetMemoryLimit() (uint64, error) {
 	}
 
 	var memoryLimitPath string
+	var content []byte
+
 	if isCgroupV2 {
 		// cgroup v2: /sys/fs/cgroup/<path>/memory.max
 		memoryLimitPath = "/sys/fs/cgroup" + cgroupPath + "/memory.max"
+		content, err = os.ReadFile(memoryLimitPath)
 	} else {
 		// cgroup v1: /sys/fs/cgroup/memory/<path>/memory.limit_in_bytes
 		memoryLimitPath = "/sys/fs/cgroup/memory" + cgroupPath + "/memory.limit_in_bytes"
+		content, err = os.ReadFile(memoryLimitPath)
+
+		// If cgroup v1 path doesn't exist, try cgroup v2 as fallback
+		if err != nil && os.IsNotExist(err) {
+			memoryLimitPath = "/sys/fs/cgroup" + cgroupPath + "/memory.max"
+			content, err = os.ReadFile(memoryLimitPath)
+		}
 	}
 
-	content, err := os.ReadFile(memoryLimitPath)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read %s: %w", memoryLimitPath, err)
 	}
