@@ -119,18 +119,37 @@ func GetMemoryLimit() (uint64, error) {
 		return 0, fmt.Errorf("cgroup path not found")
 	}
 
-	var memoryLimitPath string
+	var content []byte
+	var lastErr error
+
+	// List of paths to try in order
+	pathsToTry := []string{}
+
 	if isCgroupV2 {
-		// cgroup v2: /sys/fs/cgroup/<path>/memory.max
-		memoryLimitPath = "/sys/fs/cgroup" + cgroupPath + "/memory.max"
+		// cgroup v2 paths
+		pathsToTry = []string{
+			"/sys/fs/cgroup" + cgroupPath + "/memory.max",
+			"/sys/fs/cgroup/memory.max",
+		}
 	} else {
-		// cgroup v1: /sys/fs/cgroup/memory/<path>/memory.limit_in_bytes
-		memoryLimitPath = "/sys/fs/cgroup/memory" + cgroupPath + "/memory.limit_in_bytes"
+		// cgroup v1 paths - in containerized environments, often only root is accessible
+		pathsToTry = []string{
+			"/sys/fs/cgroup/memory" + cgroupPath + "/memory.limit_in_bytes",
+			"/sys/fs/cgroup/memory/memory.limit_in_bytes",
+		}
 	}
 
-	content, err := os.ReadFile(memoryLimitPath)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read %s: %w", memoryLimitPath, err)
+	// Try each path until one succeeds
+	for _, path := range pathsToTry {
+		content, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+		lastErr = err
+	}
+
+	if lastErr != nil && len(content) == 0 {
+		return 0, fmt.Errorf("failed to read memory limit from any path: %w", lastErr)
 	}
 
 	limitStr := strings.TrimSpace(string(content))
