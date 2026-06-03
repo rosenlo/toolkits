@@ -1,3 +1,10 @@
+// Package websocketclient is deprecated.
+//
+// Deprecated: use github.com/rosenlo/toolkits/wsclient instead. The wsclient
+// package supersedes this one with reconnect-friendly fields (Name, msgCount,
+// connectedAt), a longer 5-minute readTimeout, PingPong, and richer error
+// logs. This package is retained for backwards compatibility and may be
+// removed in a future major release.
 package websocketclient
 
 import (
