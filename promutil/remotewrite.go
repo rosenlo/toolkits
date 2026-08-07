@@ -2,6 +2,7 @@ package promutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -84,6 +85,32 @@ func BuildWriteRequest(ch chan prometheus.Metric, jobName, instance string) *pro
 }
 
 func BatchRemoteWrite(ctx context.Context, promClient *Client, req *prompb.WriteRequest, batch int) error {
+	return BatchRemoteWriteWithRetry(ctx, promClient, req, batch, RetryConfig{})
+}
+
+// RetryConfig controls the retry behavior of BatchRemoteWriteWithRetry. The
+// zero value performs a single attempt with no retries.
+type RetryConfig struct {
+	MaxRetries     int
+	InitialBackoff time.Duration
+	MaxBackoff     time.Duration
+}
+
+// BatchRemoteWriteWithRetry splits the request into batches of at most batch
+// series and remote-writes each batch, retrying retryable failures
+// (transport-level errors and 429/5xx responses) with exponential backoff.
+//
+// A batch carries fixed timestamps from BuildWriteRequest, so re-sending it is
+// idempotent for the receiving VM endpoint: a retry after a transient failure
+// cannot duplicate series. The first attempt is included in MaxRetries, i.e.
+// MaxRetries=3 means up to 4 total attempts.
+func BatchRemoteWriteWithRetry(
+	ctx context.Context,
+	promClient *Client,
+	req *prompb.WriteRequest,
+	batch int,
+	retry RetryConfig,
+) error {
 	ts := req.Timeseries
 
 	r := &prompb.WriteRequest{}
@@ -99,13 +126,49 @@ func BatchRemoteWrite(ctx context.Context, promClient *Client, req *prompb.Write
 		if err != nil {
 			return err
 		}
-		err = promClient.Write(ctx, data)
-		if err != nil {
+		if err := writeBatchWithRetry(ctx, promClient, data, retry); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func writeBatchWithRetry(ctx context.Context, promClient *Client, data []byte, retry RetryConfig) error {
+	for attempt := 0; ; attempt++ {
+		err := promClient.Write(ctx, data)
+		if err == nil {
+			return nil
+		}
+		if !retryableWriteError(err) || attempt >= retry.MaxRetries {
+			return err
+		}
+
+		backoff := retry.InitialBackoff
+		for i := 0; i < attempt; i++ {
+			backoff *= 2
+			if retry.MaxBackoff > 0 && backoff > retry.MaxBackoff {
+				backoff = retry.MaxBackoff
+				break
+			}
+		}
+		if backoff > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+	}
+}
+
+func retryableWriteError(err error) bool {
+	var we *WriteError
+	if !errors.As(err, &we) {
+		// Non-WriteError (e.g. proto marshaling) is not retryable.
+		return false
+	}
+	return we.Retryable()
 }
 
 func FillCounter(
