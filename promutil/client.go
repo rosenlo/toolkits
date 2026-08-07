@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -22,6 +23,12 @@ const (
 	V1LabelValues = "/api/v1/label/%s/values"
 	V1Import      = "/api/v1/import/prometheus"
 	V1Write       = "/api/v1/write"
+
+	// DefaultWriteTimeout bounds a single remote-write HTTP request. Without a
+	// client timeout a stuck connection can block the exporter's export cycle
+	// indefinitely, which for the E2E exporter compounds into a permanent
+	// fail-closed evidence latch on the first transient blip.
+	DefaultWriteTimeout = 10 * time.Second
 )
 
 type Option func(*Client)
@@ -41,6 +48,7 @@ func NewClient(cfg Config, opts ...Option) *Client {
 		client: httpclient.New(nil),
 		cfg:    cfg,
 	}
+	c.client.WithTimeout(DefaultWriteTimeout)
 	for _, o := range opts {
 		o(c)
 	}
@@ -57,6 +65,40 @@ func WithHttpClient(client *httpclient.Client) Option {
 	return func(c *Client) {
 		c.client = client
 	}
+}
+
+// WithTimeout sets the per-request timeout for every request this client
+// issues. Callers that do not opt in are bounded by DefaultWriteTimeout.
+func WithTimeout(timeout time.Duration) Option {
+	return func(c *Client) {
+		c.client.WithTimeout(timeout)
+	}
+}
+
+// WriteError carries the HTTP status that rejected a write and whether the
+// failure is safe to retry. Transport-level failures (connection reset,
+// timeout, dial errors) and 429/5xx responses are retryable; 4xx responses
+// indicate the payload was rejected and should not be re-sent as-is.
+type WriteError struct {
+	StatusCode int
+	RespBody   string
+	Err        error
+}
+
+func (e *WriteError) Error() string {
+	return fmt.Sprintf("remote write failed: status=%d resp=%q err=%v", e.StatusCode, e.RespBody, e.Err)
+}
+
+func (e *WriteError) Unwrap() error { return e.Err }
+
+// Retryable reports whether this write error is safe to retry. StatusCode 0
+// means the failure happened before an HTTP response (transport-level: dial,
+// timeout, connection reset), which is always retryable.
+func (e *WriteError) Retryable() bool {
+	if e.StatusCode == 0 {
+		return true
+	}
+	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= http.StatusInternalServerError
 }
 
 func (c *Client) Export(metric string, start, end int64) ([]byte, error) {
@@ -212,14 +254,22 @@ func (c *Client) Write(ctx context.Context, payload []byte) error {
 	resp, respBody, err := c.client.RequestWithContext(ctx, "POST", _url, headers, snappy.Encode(nil, payload))
 
 	if err != nil {
-		return fmt.Errorf("failed to request: %v", err)
+		return &WriteError{
+			StatusCode: 0,
+			RespBody:   "",
+			Err:        fmt.Errorf("failed to request: %w", err),
+		}
 	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
 
-	return fmt.Errorf("vmagent returned error: %s", respBody)
+	return &WriteError{
+		StatusCode: resp.StatusCode,
+		RespBody:   string(respBody),
+		Err:        fmt.Errorf("vmagent returned error"),
+	}
 }
 
 func (c *Client) GetSelectAddress() string {
