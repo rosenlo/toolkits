@@ -57,18 +57,24 @@ func New(maxBytes int64, onEvicted func(string, Value)) *Cache {
 // a one-minute ticker, so shorter expirations are honored with at most that
 // much extra retention; longer expirations are honored exactly.
 func NewWithExpiration(maxBytes int64, expiration time.Duration, onEvicted func(string, Value)) *Cache {
+	c := newCache(maxBytes, expiration, onEvicted)
+	go c.startEvictionTimer()
+	return c
+}
+
+// newCache builds a cache without starting its eviction timer, so that
+// ShardedCache can drive one timer across all of its shards.
+func newCache(maxBytes int64, expiration time.Duration, onEvicted func(string, Value)) *Cache {
 	if expiration <= 0 {
 		expiration = DefaultExpiration
 	}
-	c := &Cache{
+	return &Cache{
 		maxBytes:   maxBytes,
 		ll:         list.New(),
 		cache:      make(map[string]*list.Element),
 		OnEvicted:  onEvicted,
 		expiration: expiration,
 	}
-	go c.startEvictionTimer()
-	return c
 }
 
 func (c *Cache) Get(key string) (value Value, ok bool) {
@@ -137,12 +143,26 @@ func (c *Cache) removeElement(e *list.Element) {
 	}
 }
 
+// UsedBytes reports the bytes the cache currently holds.
+func (c *Cache) UsedBytes() int64 {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return c.curBytes
+}
+
+// MaxBytes reports the cache's budget; 0 means unbounded.
+func (c *Cache) MaxBytes() int64 {
+	return c.maxBytes
+}
+
 func (c *Cache) startEvictionTimer() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for range ticker.C {
 		c.RemoveStaleEntries()
-		lraUsedBytes.WithLabelValues().Set(float64(c.curBytes))
+		// Read curBytes through the lock: the timer runs concurrently with
+		// Add, so touching the field directly is a data race.
+		lraUsedBytes.WithLabelValues().Set(float64(c.UsedBytes()))
 		lraTotalBytes.WithLabelValues().Set(float64(c.maxBytes))
 	}
 }
