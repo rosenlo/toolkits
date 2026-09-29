@@ -18,8 +18,8 @@ type CPU struct {
 	Virtual bool
 }
 
-func (c *CPU) String() {
-	fmt.Sprintf("<Module: %s, Num: %d, MHz: %d, Virtual: %t, Flags: %s>", c.Module, c.Num, c.MHz, c.Virtual, c.Flags)
+func (c *CPU) String() string {
+	return fmt.Sprintf("<Module: %s, Num: %d, MHz: %d, Virtual: %t, Flags: %s>", c.Module, c.Num, c.MHz, c.Virtual, c.Flags)
 }
 
 func NewCPU() *CPU {
