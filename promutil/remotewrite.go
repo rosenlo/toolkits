@@ -111,27 +111,46 @@ func BatchRemoteWriteWithRetry(
 	batch int,
 	retry RetryConfig,
 ) error {
+	_, err := BatchRemoteWriteProgress(ctx, promClient, req, batch, retry)
+	return err
+}
+
+// BatchRemoteWriteProgress is BatchRemoteWriteWithRetry that reports how many
+// of req's series were written before it stopped. Batches are sent in order
+// and each is committed on its own, so on an error the caller can resume from
+// req.Timeseries[written:] instead of re-sending what already landed. A batch
+// of zero or less sends the whole request at once.
+func BatchRemoteWriteProgress(
+	ctx context.Context,
+	promClient *Client,
+	req *prompb.WriteRequest,
+	batch int,
+	retry RetryConfig,
+) (written int, err error) {
 	ts := req.Timeseries
+	if batch <= 0 {
+		batch = len(ts)
+	}
 
 	r := &prompb.WriteRequest{}
 	defer r.Reset()
 	for i := 0; i < len(ts); i += batch {
-		if i+batch > len(ts) {
-			r.Timeseries = ts[i:]
-		} else {
-			r.Timeseries = ts[i : i+batch]
+		end := i + batch
+		if end > len(ts) {
+			end = len(ts)
 		}
+		r.Timeseries = ts[i:end]
 
 		data, err := proto.Marshal(r)
 		if err != nil {
-			return err
+			return i, err
 		}
 		if err := writeBatchWithRetry(ctx, promClient, data, retry); err != nil {
-			return err
+			return i, err
 		}
 	}
 
-	return nil
+	return len(ts), nil
 }
 
 func writeBatchWithRetry(ctx context.Context, promClient *Client, data []byte, retry RetryConfig) error {

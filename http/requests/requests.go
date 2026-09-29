@@ -44,7 +44,7 @@ func (r *Requests) Get(url string) *Requests {
 
 func (r *Requests) AddHeader(header map[string]string) *Requests {
 	for param, value := range header {
-		r.req.Header.Set(param, value)
+		r.req.Set(param, value)
 	}
 	return r
 }

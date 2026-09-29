@@ -9,6 +9,7 @@ import (
 	"github.com/rosenlo/toolkits/log"
 
 	"github.com/parnurzeal/gorequest"
+	"go.uber.org/zap"
 )
 
 type Request struct {
@@ -26,21 +27,20 @@ func NewRequest(base string) *Request {
 func printResponse(rsp gorequest.Response, body []byte, errs []error) {
 	for _, err := range errs {
 		if err != nil {
-			log.Error(err)
+			log.Error(err.Error())
 		}
 	}
-	log.WithFields(map[string]interface{}{
-		"method":      rsp.Request.Method,
-		"url":         rsp.Request.URL.Path,
-		"status":      rsp.Status,
-		"status_code": rsp.StatusCode,
-		// "response":    string(body),
-	}).Debug()
+	log.Debug("response",
+		zap.String("method", rsp.Request.Method),
+		zap.String("url", rsp.Request.URL.Path),
+		zap.String("status", rsp.Status),
+		zap.Int("status_code", rsp.StatusCode),
+	)
 }
 
 func (r *Request) AddHeader(header map[string]string) *Request {
 	for param, value := range header {
-		r.req.Header.Set(param, value)
+		r.req.Set(param, value)
 	}
 	return r
 }

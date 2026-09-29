@@ -25,9 +25,9 @@ const (
 	V1Write       = "/api/v1/write"
 
 	// DefaultWriteTimeout bounds a single remote-write HTTP request. Without a
-	// client timeout a stuck connection can block the exporter's export cycle
-	// indefinitely, which for the E2E exporter compounds into a permanent
-	// fail-closed evidence latch on the first transient blip.
+	// client timeout a stuck connection can block the caller's export cycle
+	// indefinitely, and one transient network fault then stalls every export
+	// after it.
 	DefaultWriteTimeout = 10 * time.Second
 )
 
