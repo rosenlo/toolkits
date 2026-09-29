@@ -334,3 +334,20 @@ func TestConfigValidateRejectsTheNewBounds(t *testing.T) {
 
 // Keep prompb in use for the helpers above even if a test drops it.
 var _ = prompb.Label{}
+
+// A claim outlives its session. When a partition comes back from the oldest
+// offset, what the last session received says nothing about where it is: it
+// must start behind, or an idle release would publish windows its backlog
+// has not yet delivered.
+func TestAReusedClaimStartedAtOldestIsBehindNotCaughtUp(t *testing.T) {
+	a, s := newAcc(t, 0, 1)
+	a.Claim(topic, 1).Received(999, 1_000) // the last session read p1 to its end
+	a.StartGeneration(map[string][]int32{topic: {0, 1}}, time.UnixMilli(t0))
+	a.Claim(topic, 0).Start(0, 1_000_000)
+	a.Claim(topic, 1).Start(OffsetOldest, 1_000)
+	observe(a, 0, 0, "h", t0+1_000, t0+5*min, t0+5*min)
+	flush(t, a, t0+5*min)
+	if wm := s.samples(metricWatermark); len(wm) != 0 {
+		t.Fatalf("a partition replaying from the oldest offset released the watermark: %+v", wm)
+	}
+}

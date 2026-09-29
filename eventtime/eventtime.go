@@ -304,14 +304,17 @@ type Claim struct {
 
 // Start records where the claim begins, before its first message. An initial
 // offset may be a sentinel: OffsetNewest (-1) starts at the high-water mark, so
-// the claim begins caught up; OffsetOldest (-2) begins behind until its first
-// message says where it is.
+// the claim begins caught up; OffsetOldest (-2), or any other, begins behind
+// until its first message says where it is. A claim outlives its session, so
+// nothing a previous session received is kept.
 func (c *Claim) Start(initialOffset, highWaterMark int64) {
 	switch {
 	case initialOffset >= 0:
 		c.received.Store(initialOffset - 1)
 	case initialOffset == OffsetNewest:
 		c.received.Store(highWaterMark - 1)
+	default:
+		c.received.Store(-1)
 	}
 	c.hwm.Store(highWaterMark)
 }
