@@ -226,3 +226,54 @@ func TestBatchRemoteWriteBackwardCompatibleNoRetry(t *testing.T) {
 		t.Fatalf("attempts = %d, want 1 (legacy call does not retry)", got)
 	}
 }
+
+func TestBatchRemoteWriteProgressReportsWhereItStopped(t *testing.T) {
+	var batches atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if batches.Add(1) == 3 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req := &prompb.WriteRequest{}
+	for i := 0; i < 10; i++ {
+		req.Timeseries = append(req.Timeseries, testBatchRequest().Timeseries...)
+	}
+	client := NewClient(Config{InsertAddress: server.URL})
+	written, err := BatchRemoteWriteProgress(context.Background(), client, req, 3, RetryConfig{})
+	if err == nil {
+		t.Fatal("expected the third batch to fail")
+	}
+	if written != 6 {
+		t.Fatalf("written = %d, want 6 (two batches of 3 before the failure)", written)
+	}
+
+	written, err = BatchRemoteWriteProgress(context.Background(), client,
+		&prompb.WriteRequest{Timeseries: req.Timeseries[written:]}, 3, RetryConfig{})
+	if err != nil || written != 4 {
+		t.Fatalf("resume: written = %d, err = %v, want the remaining 4", written, err)
+	}
+}
+
+func TestBatchRemoteWriteProgressSendsAllAtOnceWithoutABatchSize(t *testing.T) {
+	var batches atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		batches.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	req := &prompb.WriteRequest{}
+	for i := 0; i < 5; i++ {
+		req.Timeseries = append(req.Timeseries, testBatchRequest().Timeseries...)
+	}
+	written, err := BatchRemoteWriteProgress(context.Background(), NewClient(Config{InsertAddress: server.URL}), req, 0, RetryConfig{})
+	if err != nil || written != 5 || batches.Load() != 1 {
+		t.Fatalf("written = %d, err = %v, batches = %d", written, err, batches.Load())
+	}
+}
