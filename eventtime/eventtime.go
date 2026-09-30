@@ -184,6 +184,16 @@ type Config struct {
 	// ArrivalLagBuckets bound the arrival-lag self-metric. Default
 	// DefaultArrivalLagBuckets.
 	ArrivalLagBuckets []float64
+	// Lineage turns on what a reader needs to prove a window final: the
+	// observation counters, terminal and claim records, the write gate, the
+	// writer tag on a stamp, and the generation label on the watermark (see
+	// lineage.go). Off, nothing written or exposed changes.
+	Lineage bool
+	// TerminalFamilies are the counter families a terminal record is written
+	// for, by the name passed to Count. Only with Lineage. A distinct or
+	// histogram family named here has no counter cells, so its records would
+	// read zero: name counter families only.
+	TerminalFamilies []string
 
 	Names Names
 }
@@ -231,6 +241,13 @@ func (c Config) Validate() error {
 			c.EarlyLateness+c.DistinctHorizon+c.Window, c.MaxLateness)
 	case c.DistinctCap < 0:
 		return fmt.Errorf("distinct cap must not be negative: %d", c.DistinctCap)
+	case len(c.TerminalFamilies) > 0 && !c.Lineage:
+		return errors.New("terminal families need lineage")
+	}
+	for _, f := range c.TerminalFamilies {
+		if _, ok := c.HistogramBuckets[f]; ok {
+			return fmt.Errorf("terminal family %s is a histogram: terminal records are for counter families", f)
+		}
 	}
 	for family, bounds := range c.HistogramBuckets {
 		if err := checkBounds(bounds); err != nil {
@@ -274,6 +291,10 @@ type Reading struct {
 // Stamp is the event-time window a message was assigned to.
 type Stamp struct {
 	window int64
+	// gen is the writer the message was received under, 0 when untagged
+	// (StampAs). With Lineage a tagged count for any other writer is not
+	// stored.
+	gen int64
 }
 
 const (
@@ -300,6 +321,7 @@ type partKey struct {
 type Claim struct {
 	received atomic.Int64 // offset of the last message received
 	hwm      atomic.Int64 // the claim's high-water mark at that time
+	handed   atomic.Bool  // a message was handed on this session (Lineage)
 }
 
 // Start records where the claim begins, before its first message. An initial
@@ -317,6 +339,7 @@ func (c *Claim) Start(initialOffset, highWaterMark int64) {
 		c.received.Store(-1)
 	}
 	c.hwm.Store(highWaterMark)
+	c.handed.Store(false)
 }
 
 // OffsetNewest and OffsetOldest are the conventional Kafka client sentinels for
@@ -469,13 +492,17 @@ func (s *Shard) Stamp(topic string, partition int32, r Reading, nowMs int64) Sta
 // and labelValues must not be modified afterwards; they are copied only when
 // the series first appears.
 func (s *Shard) Count(st Stamp, key, name string, labelNames, labelValues []string) {
-	if st.window < s.acc.sealedBefore.Load() {
-		s.mu.Lock()
+	late := st.window < s.acc.sealedBefore.Load()
+	s.mu.Lock()
+	if s.acc.lin.on && s.afterEnd(st, name) {
+		s.mu.Unlock()
+		return
+	}
+	if late {
 		s.stats.late[name]++
 		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
 	win := s.lastWin
 	if win == nil || s.lastStart != st.window {
 		win = s.windows[st.window]
@@ -521,13 +548,17 @@ func (s *Shard) Distinct(st Stamp, key, name string, labelNames, labelValues []s
 	if a.distinctMs <= 0 {
 		return
 	}
-	if st.window < a.distinctBefore.Load() || st.window < a.sealedBefore.Load() {
-		s.mu.Lock()
+	late := st.window < a.distinctBefore.Load() || st.window < a.sealedBefore.Load()
+	s.mu.Lock()
+	if a.lin.on && s.staleDistinct(st, name) {
+		s.mu.Unlock()
+		return
+	}
+	if late {
 		s.stats.distinctLate[name]++
 		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
 	win := s.distinct[st.window]
 	if win == nil {
 		win = make(map[string]*dset)
@@ -559,13 +590,17 @@ func (s *Shard) Observe(st Stamp, key, name string, labelNames, labelValues []st
 		s.mu.Unlock()
 		return
 	}
-	if st.window < a.sealedBefore.Load() {
-		s.mu.Lock()
+	late := st.window < a.sealedBefore.Load()
+	s.mu.Lock()
+	if a.lin.on && s.afterEnd(st, name) {
+		s.mu.Unlock()
+		return
+	}
+	if late {
 		s.stats.late[name]++
 		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
 	win := s.hist[st.window]
 	if win == nil {
 		win = make(map[string]*hdelta)
@@ -631,6 +666,7 @@ type Accumulator struct {
 	delayBuckets, lagBuckets                        []float64
 	names                                           Names
 	descs                                           descs
+	linDescs                                        lineageDescs
 
 	instance string
 	jobName  string
@@ -672,6 +708,8 @@ type Accumulator struct {
 	total    *stats
 	gauges   gauges
 	counters counters
+
+	lin lineage
 }
 
 type counters struct {
@@ -682,6 +720,8 @@ type counters struct {
 	holdReleases     uint64
 	cappedFlushes    uint64
 	droppedUnwritten map[string]uint64
+	claimErrors      uint64
+	terminalErrors   uint64
 }
 
 type gauges struct {
@@ -738,6 +778,7 @@ func New(cfg Config, jobName, instance string, workers int, write Writer,
 		lagBuckets:   cfg.ArrivalLagBuckets,
 		names:        names,
 		descs:        newDescs(names),
+		linDescs:     newLineageDescs(names),
 		instance:     instance,
 		jobName:      jobName,
 		write:        write,
@@ -746,6 +787,7 @@ func New(cfg Config, jobName, instance string, workers int, write Writer,
 		windowNames:  make(map[string]string),
 		counters:     counters{droppedUnwritten: make(map[string]uint64)},
 	}
+	a.lin.init(cfg)
 	a.total = a.newStats()
 	for i := 0; i < workers; i++ {
 		s := &Shard{acc: a}
@@ -800,7 +842,12 @@ func (a *Accumulator) closeSession() {
 func (a *Accumulator) StartGeneration(assigned map[string][]int32, now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.generationMs = now.UnixMilli()
+	genMs := now.UnixMilli()
+	if a.lin.on && genMs <= a.generationMs {
+		// Unique in the process: a writer id names one session.
+		genMs = a.generationMs + 1
+	}
+	a.generationMs = genMs
 	a.generation = strconv.FormatInt(a.generationMs, 10)
 	a.openSession()
 	a.parts = make(map[partKey]*partState)
@@ -813,6 +860,9 @@ func (a *Accumulator) StartGeneration(assigned map[string][]int32, now time.Time
 	a.podW = 0
 	a.sealedBefore.Store(0)
 	a.distinctBefore.Store(0)
+	if a.lin.on {
+		a.startLineage()
+	}
 }
 
 // EndGeneration writes every changed window, including those the watermark
@@ -825,8 +875,18 @@ func (a *Accumulator) EndGeneration(ctx context.Context) error {
 	if a.windows == nil {
 		return nil
 	}
+	if a.lin.on {
+		// Before the merge takes the shard locks: a count either lands in it
+		// or is seen as after the end, never in the next writer.
+		a.lin.current.Store(0)
+	}
 	a.merge()
-	err := a.writeAllOrDrop(ctx)
+	var err error
+	if a.lin.on {
+		err = a.endLineage(ctx)
+	} else {
+		err = a.writeAllOrDrop(ctx)
+	}
 	a.closeSession()
 	a.parts = nil
 	a.podW = 0
@@ -839,11 +899,20 @@ func (a *Accumulator) EndGeneration(ctx context.Context) error {
 // Drain writes what the workers counted after the session ended — the
 // messages still queued when it closed — under the last session's writer. Call
 // it at shutdown, once the workers have stopped; inside a session it does
-// nothing, since the next flush carries those counts.
+// nothing, since the next flush carries those counts. With Lineage it writes
+// nothing: the last writer's terminal records are already written, so those
+// counts go on after_end_total instead (drain the queue before EndGeneration).
 func (a *Accumulator) Drain(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.windows != nil {
+		return nil
+	}
+	if a.lin.on {
+		// The last writer's terminal records are written: what the workers
+		// counted after them is counted, never written under it.
+		a.discardShards()
+		a.refreshGauges(time.Now().UnixMilli())
 		return nil
 	}
 	if a.generation == "" {
@@ -863,15 +932,20 @@ func (a *Accumulator) Drain(ctx context.Context) error {
 func (a *Accumulator) writeAllOrDrop(ctx context.Context) error {
 	_, err := a.writeWindows(ctx, math.MaxInt64, 0)
 	if err != nil {
-		for start, set := range a.dirty {
-			win := a.windows[start]
-			for sr := range set {
-				c := win[sr]
-				a.addDropped(sr.name, c.total-c.written)
-			}
-		}
+		a.dropDirty()
 	}
 	return err
+}
+
+// dropDirty counts every unwritten count as dropped. The caller holds a.mu.
+func (a *Accumulator) dropDirty() {
+	for start, set := range a.dirty {
+		win := a.windows[start]
+		for sr := range set {
+			c := win[sr]
+			a.addDropped(sr.name, c.total-c.written)
+		}
+	}
 }
 
 // Flush folds the shards in, writes the windows the watermark has passed, and
@@ -887,15 +961,30 @@ func (a *Accumulator) Flush(ctx context.Context, now time.Time) error {
 		return nil
 	}
 	a.merge()
+	var claimErr error
+	gated := false
+	if a.lin.on {
+		claimErr = a.writeClaims(ctx)
+		gated = a.gateShut()
+		a.noteGate(gated, nowMs)
+	}
 	w, ok := a.watermark(nowMs)
 	if !ok {
-		return nil
+		return claimErr
+	}
+	if gated {
+		// Nothing is written until every contributing partition names this
+		// writer; windows past twice max_lateness are still dropped and
+		// counted, and their terminal pairs kept.
+		a.release(w)
+		a.seal(w)
+		return claimErr
 	}
 	capped, err := a.writeWindows(ctx, w-a.earlyMs, a.maxRows)
 	if err != nil {
 		a.release(w)
 		a.seal(w)
-		return err
+		return errors.Join(claimErr, err)
 	}
 	if capped {
 		// Windows the watermark has passed are still unwritten, so it must not
@@ -905,11 +994,14 @@ func (a *Accumulator) Flush(ctx context.Context, now time.Time) error {
 		a.statsMu.Unlock()
 		a.release(w)
 		a.seal(w)
-		return nil
+		return claimErr
 	}
 	err = a.publishWatermark(ctx, w, nowMs)
 	a.release(w)
 	a.seal(w)
+	if a.lin.on {
+		err = errors.Join(claimErr, err, a.writeTerminals(ctx, a.sealedBefore.Load()))
+	}
 	return err
 }
 
@@ -949,6 +1041,9 @@ func (a *Accumulator) merge() {
 			}
 			win := a.window(start, len(deltas))
 			for key, d := range deltas {
+				if a.lin.on {
+					a.lin.folded[d.name] += d.n
+				}
 				sr := a.seriesFor(key, d.name, kindCounter, d.labelNames, d.labelValues, nil)
 				c, ok := win[sr]
 				if !ok {
@@ -1057,6 +1152,9 @@ func (a *Accumulator) mergeHist(hist map[int64]map[string]*hdelta, sealed int64)
 			a.hist[start] = hwin
 		}
 		for key, d := range deltas {
+			if a.lin.on {
+				a.lin.folded[d.name] += d.n
+			}
 			sr := a.seriesFor(key, d.name, kindHistogram, d.labelNames, d.labelValues, d.bounds)
 			c, ok := win[sr]
 			if !ok {
@@ -1367,12 +1465,21 @@ func (a *Accumulator) publishWatermark(ctx context.Context, w, nowMs int64) erro
 			prompb.Label{Name: "instance", Value: a.instance},
 		)
 	}
+	watermarkLabels := func(extra ...prompb.Label) []prompb.Label {
+		labels := common(a.MetricWatermark(), extra...)
+		if a.lin.on {
+			// A reader ties each writer on a partition's lineage to its own
+			// watermark; max by partition still takes the furthest.
+			labels = append(labels, prompb.Label{Name: LabelGeneration, Value: a.generation})
+		}
+		return labels
+	}
 	sample := func(v float64) []prompb.Sample { return []prompb.Sample{{Value: v, Timestamp: nowMs}} }
 	topics := make(map[string]struct{})
 	for k := range a.parts {
 		topics[k.topic] = struct{}{}
 		req.Timeseries = append(req.Timeseries, prompb.TimeSeries{
-			Labels: common(a.MetricWatermark(),
+			Labels: watermarkLabels(
 				prompb.Label{Name: "topic", Value: k.topic},
 				prompb.Label{Name: "partition", Value: strconv.Itoa(int(k.partition))}),
 			Samples: sample(float64(w) / 1000),
@@ -1429,8 +1536,12 @@ func (a *Accumulator) seal(w int64) {
 		for sr := range set {
 			c := win[sr]
 			a.addDropped(sr.name, c.total-c.written)
-			c.written = c.total
-			win[sr] = c
+			if !a.lin.on {
+				// With lineage the window is deleted below in this same call,
+				// and its terminal pair must carry what was really written.
+				c.written = c.total
+				win[sr] = c
+			}
 		}
 		delete(a.dirty, start)
 	}
@@ -1444,6 +1555,9 @@ func (a *Accumulator) seal(w int64) {
 	for start, win := range a.windows {
 		if start >= bound {
 			continue
+		}
+		if a.lin.on {
+			a.foldPair(start, win)
 		}
 		for sr := range win {
 			if sr.cells--; sr.cells == 0 {
@@ -1466,6 +1580,9 @@ func (a *Accumulator) addDropped(name string, n uint64) {
 }
 
 func (a *Accumulator) refreshGauges(nowMs int64) {
+	if a.lin.on {
+		a.publishLineageStats(nowMs)
+	}
 	cells, members := 0, 0
 	for _, win := range a.windows {
 		cells += len(win)
