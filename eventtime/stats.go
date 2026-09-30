@@ -57,6 +57,9 @@ type stats struct {
 	// rejected counts histogram observations refused for being negative or
 	// not finite.
 	rejected map[string]uint64
+	// intake and afterEnd are the lineage books (lineage.go).
+	intake   map[string]uint64
+	afterEnd map[string]uint64
 }
 
 func (a *Accumulator) newStats() *stats {
@@ -66,6 +69,8 @@ func (a *Accumulator) newStats() *stats {
 		late:         make(map[string]uint64),
 		distinctLate: make(map[string]uint64),
 		rejected:     make(map[string]uint64),
+		intake:       make(map[string]uint64),
+		afterEnd:     make(map[string]uint64),
 	}
 	for i := range s.delay {
 		s.delay[i] = newHistogram(a.delayBuckets)
@@ -91,6 +96,12 @@ func (s *stats) add(o *stats) {
 	}
 	for k, v := range o.rejected {
 		s.rejected[k] += v
+	}
+	for k, v := range o.intake {
+		s.intake[k] += v
+	}
+	for k, v := range o.afterEnd {
+		s.afterEnd[k] += v
 	}
 }
 
@@ -164,6 +175,12 @@ func (a *Accumulator) Describe(ch chan<- *prometheus.Desc) {
 	for _, d := range a.descs.all() {
 		ch <- d
 	}
+	if a.lin.on {
+		d := a.linDescs
+		ch <- d.observations
+		ch <- d.afterEnd
+		ch <- d.gateHeld
+	}
 }
 
 // Collect implements prometheus.Collector.
@@ -208,4 +225,9 @@ func (a *Accumulator) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(d.sealedBefore, prometheus.GaugeValue, float64(g.sealedBefore)/1000)
 	ch <- prometheus.MustNewConstMetric(d.openMembers, prometheus.GaugeValue, float64(g.openMembers))
 	ch <- prometheus.MustNewConstMetric(d.heldPartitions, prometheus.GaugeValue, float64(g.heldByMaxHold))
+	if a.lin.on {
+		ch <- prometheus.MustNewConstMetric(d.writeErrors, prometheus.CounterValue, float64(c.claimErrors), "claims")
+		ch <- prometheus.MustNewConstMetric(d.writeErrors, prometheus.CounterValue, float64(c.terminalErrors), "terminals")
+		a.collectLineage(ch)
+	}
 }
