@@ -27,7 +27,10 @@ import (
 //     starts sealed below that bound, so it cannot count into a window it owes
 //     no record for.
 //   - A claim record, per partition, names the writer that held the partition
-//     before this one, as the caller read it from the log (Register).
+//     before this one, as the caller read it from the log (Register). It is
+//     written stamped at the claim time, then re-written at every flush and at
+//     the writer's end, stamped then: a store keeps it for its retention only,
+//     and a writer may outlive that.
 //   - The write gate: nothing of the writer is written (windows, terminal
 //     records, watermark) while any partition that has handed a message to the
 //     workers (Claim.Hand) is not registered with its claim record written. A
@@ -51,6 +54,7 @@ type lpart struct {
 	claimWritten bool
 	predecessor  string
 	atMs         int64
+	lastMs       int64 // the timestamp of the last claim sample written
 }
 
 type lineage struct {
@@ -261,21 +265,37 @@ func (a *Accumulator) noteGate(shut bool, nowMs int64) {
 	}
 }
 
-// writeClaims writes the claim records registered and not yet written. The
-// caller holds a.mu.
-func (a *Accumulator) writeClaims(ctx context.Context) error {
-	type pending struct {
-		k partKey
-		p lpart
-	}
-	var todo []pending
+// writeClaims writes the claim records registered and not yet written, stamped
+// at the claim time, then re-writes the written ones stamped at nowMs if that is
+// later than their last sample. The two go in separate requests, so a refused
+// re-write never holds a first write, and with it the gate. The caller holds
+// a.mu.
+func (a *Accumulator) writeClaims(ctx context.Context, nowMs int64) error {
+	var first, again []claimWrite
 	a.lin.regMu.Lock()
 	for k, p := range a.lin.parts {
-		if p.registered && !p.claimWritten {
-			todo = append(todo, pending{k, *p})
+		switch {
+		case !p.registered:
+		case !p.claimWritten:
+			first = append(first, claimWrite{k, *p, p.atMs})
+		case nowMs > p.lastMs:
+			again = append(again, claimWrite{k, *p, nowMs})
 		}
 	}
 	a.lin.regMu.Unlock()
+	return errors.Join(a.writeClaimBatch(ctx, first), a.writeClaimBatch(ctx, again))
+}
+
+// claimWrite is one claim sample to write: the value is the claim time, the
+// timestamp at.
+type claimWrite struct {
+	k  partKey
+	p  lpart
+	at int64
+}
+
+// writeClaimBatch writes one request of claim samples. The caller holds a.mu.
+func (a *Accumulator) writeClaimBatch(ctx context.Context, todo []claimWrite) error {
 	if len(todo) == 0 {
 		return nil
 	}
@@ -289,7 +309,7 @@ func (a *Accumulator) writeClaims(ctx context.Context) error {
 		}
 		req.Timeseries = append(req.Timeseries, prompb.TimeSeries{
 			Labels:  a.writerLabels(labels),
-			Samples: []prompb.Sample{{Value: float64(t.p.atMs) / 1000, Timestamp: t.p.atMs}},
+			Samples: []prompb.Sample{{Value: float64(t.p.atMs) / 1000, Timestamp: t.at}},
 		})
 	}
 	if err := a.write(ctx, req); err != nil {
@@ -302,6 +322,7 @@ func (a *Accumulator) writeClaims(ctx context.Context) error {
 	for _, t := range todo {
 		if p := a.lin.parts[t.k]; p != nil {
 			p.claimWritten = true
+			p.lastMs = t.at
 		}
 	}
 	a.lin.regMu.Unlock()
@@ -392,7 +413,7 @@ var errGateHeld = errors.New("event-time writer ended with the write gate held: 
 // longer current.
 func (a *Accumulator) endLineage(ctx context.Context) error {
 	nowMs := a.lin.now().UnixMilli()
-	claimErr := a.writeClaims(ctx)
+	claimErr := a.writeClaims(ctx, nowMs)
 	// Not noteGate: a writer's end moves no gauge, and the gauge is on
 	// Flush's clock.
 	a.lin.gateSince = 0
