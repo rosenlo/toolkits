@@ -964,7 +964,7 @@ func (a *Accumulator) Flush(ctx context.Context, now time.Time) error {
 	var claimErr error
 	gated := false
 	if a.lin.on {
-		claimErr = a.writeClaims(ctx)
+		claimErr = a.writeClaims(ctx, nowMs)
 		gated = a.gateShut()
 		a.noteGate(gated, nowMs)
 	}

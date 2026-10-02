@@ -23,12 +23,19 @@ const (
 type linSink struct {
 	sink
 	refuse map[string]bool
+	// refuseFrom, when set, refuses a request carrying a claim sample stamped
+	// at or after it.
+	refuseFrom int64
 }
 
 func (s *linSink) write(ctx context.Context, req *prompb.WriteRequest) error {
 	s.mu.Lock()
 	for _, ts := range req.Timeseries {
 		if s.refuse[label(ts, "__name__")] {
+			s.mu.Unlock()
+			return errors.New("write refused")
+		}
+		if s.refuseFrom != 0 && label(ts, "__name__") == metricClaim && ts.Samples[0].Timestamp >= s.refuseFrom {
 			s.mu.Unlock()
 			return errors.New("write refused")
 		}
@@ -200,6 +207,87 @@ func TestTheGateHoldsEveryWriteUntilAHandingPartitionIsRegistered(t *testing.T) 
 		if w.generation != fmt.Sprint(t0) {
 			t.Fatalf("watermark generation %+v", w)
 		}
+	}
+}
+
+// A store keeps a claim record for its retention only, and a writer may outlive
+// it. So every flush re-writes the writer's claims at the flush, with the claim
+// time as the value, and so does its end.
+func TestAWrittenClaimIsRewrittenAtEachFlushAndAtTheEnd(t *testing.T) {
+	a, s := newLinAcc(t, 0)
+	register(a, 0)
+	flush(t, a, t0) // the first write, stamped at the claim time
+	flush(t, a, t0+15*min)
+	flush(t, a, t0+30*min)
+	if err := a.EndGeneration(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	claims := s.series(metricClaim, "partition", "predecessor", LabelGeneration)
+	for _, at := range []int64{t0, t0 + 15*min, t0 + 30*min, t0 + 60*min} {
+		if v := claims[fmt.Sprintf("0|pod-z/1|%d|%d", t0, at)]; v != float64(t0)/1000 {
+			t.Fatalf("claim at %d: %v, all %v", (at-t0)/min, v, claims)
+		}
+	}
+	if len(claims) != 4 {
+		t.Fatalf("claims %v", claims)
+	}
+}
+
+// A failed re-write is counted, and leaves the gate open: the claim was
+// written once, which is what the gate waits for.
+func TestAFailedClaimRewriteLeavesTheGateOpen(t *testing.T) {
+	a, s := newLinAcc(t, 0)
+	g := a.Generation()
+	register(a, 0)
+	flush(t, a, t0)
+	s.setRefuse(metricClaim)
+	hand(a, g, 0, "h", t0+15*min, t0+15*min, t0+15*min)
+	if err := a.Flush(context.Background(), time.UnixMilli(t0+15*min)); err == nil {
+		t.Fatal("no error for a refused claim re-write")
+	}
+	if a.gateShut() {
+		t.Fatal("a failed re-write shut the gate")
+	}
+	if n := s.count(metricWatermark); n == 0 {
+		t.Fatal("no watermark while the gate is open")
+	}
+	out, _ := testutil.CollectAndFormat(a, expfmt.TypeTextPlain, "app_event_time_write_errors_total")
+	if !strings.Contains(string(out), `stage="claims"} 1`) {
+		t.Fatalf("write errors: %s", out)
+	}
+}
+
+// A partition registered later is written in its own request: a refused
+// re-write of the others must not hold its first write, and so the gate.
+func TestAFailedRewriteDoesNotHoldANewPartitionsFirstWrite(t *testing.T) {
+	a, s := newLinAcc(t, 0, 1)
+	g := a.Generation()
+	register(a, 0)
+	flush(t, a, t0)
+	s.refuseFrom = t0 + 1 // refuse the claim samples stamped after the claim time: the re-writes
+	register(a, 1)
+	hand(a, g, 1, "h", t0+15*min, t0+15*min, t0+15*min)
+	if err := a.Flush(context.Background(), time.UnixMilli(t0+15*min)); err == nil {
+		t.Fatal("no error for a refused claim re-write")
+	}
+	if a.gateShut() {
+		t.Fatal("the refused re-write held partition 1's first write")
+	}
+}
+
+// A re-write is never stamped at or before the last one: a store that keeps
+// samples in order would refuse it.
+func TestAClaimIsNeverRewrittenAtOrBeforeTheLastRewrite(t *testing.T) {
+	a, s := newLinAcc(t, 0)
+	register(a, 0)
+	flush(t, a, t0)
+	flush(t, a, t0+90*min) // past the end's clock, t0+60min
+	if err := a.EndGeneration(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	claims := s.series(metricClaim, "partition")
+	if _, ok := claims[fmt.Sprintf("0|%d", t0+60*min)]; ok || len(claims) != 2 {
+		t.Fatalf("claims %v", claims)
 	}
 }
 
