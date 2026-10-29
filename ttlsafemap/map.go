@@ -56,14 +56,21 @@ func (c *Cache) StartCleanupTimer(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
-			c.syncMap.Range(func(key, value any) bool {
-				item := value.(Item)
-				if time.Now().UnixNano() > item.Expiration {
-					c.Delete(key)
-					return true
-				}
-				return false
-			})
+			c.deleteExpired()
 		}
 	}()
+}
+
+// deleteExpired visits every item. Stopping at the first live one, as it once
+// did, left every expired item behind it in place for good: sync.Map's Range
+// order is fixed (a hash trie since Go 1.24), so each pass stopped at the same
+// spot, and a key that was never read again was never deleted.
+func (c *Cache) deleteExpired() {
+	now := time.Now().UnixNano()
+	c.syncMap.Range(func(key, value any) bool {
+		if now > value.(Item).Expiration {
+			c.Delete(key)
+		}
+		return true
+	})
 }
